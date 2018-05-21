@@ -88,6 +88,21 @@ class TestImageInfoMatcher(unittest.TestCase):
         self.assertTrue(test_subject.is_match("canonical", "ubuntuserver", "16.04-lts", ""))
         self.assertFalse(test_subject.is_match("canonical", "ubuntuserver", "14.04.0-lts", "16.04.201805090"))
 
+    def test_list_operator(self):
+        doc = '''{
+            "CANONICAL": {
+                "UBUNTUSERVER": {
+                    "List": [ "14.04.0-LTS", "14.04.1-LTS" ]
+                }
+            }
+        }'''
+
+        test_subject = ImageInfoMatcher(doc)
+        self.assertTrue(test_subject.is_match("Canonical", "UbuntuServer", "14.04.0-LTS", ""))
+        self.assertTrue(test_subject.is_match("Canonical", "UbuntuServer", "14.04.1-LTS", ""))
+
+        self.assertFalse(test_subject.is_match("Canonical", "UbuntuServer", "22.04-LTS", ""))
+
     def test_invalid_version(self):
         doc = '''{
             "REDHAT": {
@@ -99,6 +114,15 @@ class TestImageInfoMatcher(unittest.TestCase):
 
         test_subject = ImageInfoMatcher(doc)
         self.assertFalse(test_subject.is_match("RedHat", "RHEL", "16.04-LTS", ""))
+
+        # This is *expected* behavior as opposed to desirable.  The specification is
+        # controlled by the agent, so there is no reason to use these values, but if
+        # one does this is expected behavior.
+        #
+        # FlexibleVersion chops off all leading zeros.
+        self.assertTrue(test_subject.is_match("RedHat", "RHEL", "6.04", ""))
+        # FlexibleVersion coerces everything to a string
+        self.assertTrue(test_subject.is_match("RedHat", "RHEL", 6.04, ""))
 
 
 if __name__ == '__main__':

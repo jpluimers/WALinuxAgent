@@ -6,6 +6,7 @@ import re
 import azurelinuxagent.common.utils.restutil as restutil
 from azurelinuxagent.common.exception import HttpError
 from azurelinuxagent.common.future import ustr
+import azurelinuxagent.common.logger as logger
 from azurelinuxagent.common.protocol.restapi import DataContract, set_properties
 from azurelinuxagent.common.utils.flexible_version import FlexibleVersion
 
@@ -26,25 +27,34 @@ def get_imds_client():
 # A *slightly* future proof list of endorsed distros.
 #  -> e.g. I have predicted the future and said that 20.04-LTS will exist
 #     and is endored.
+#
+# See https://docs.microsoft.com/en-us/azure/virtual-machines/linux/endorsed-distros for
+# more details.
+#
+# This is not an exhaustive list. This is a best attempt to mark images as
+# endorsed or not.  Image publishers do not encode all of the requisite information
+# in their publisher, offer, sku, and version to definitively mark something as
+# endorsed or not.  This is not perfect, but it is approximately 98% perfect.
 ENDORSED_IMAGE_INFO_MATCHER_JSON = """{
     "CANONICAL": {
         "UBUNTUSERVER": {
-            "14.04.0-LTS": { "Match": ".*" },
-            "14.04.1-LTS": { "Match": ".*" },
-            "14.04.2-LTS": { "Match": ".*" },
-            "14.04.3-LTS": { "Match": ".*" },
-            "14.04.4-LTS": { "Match": ".*" },
-            "14.04.5-LTS": { "Match": ".*" },
-            "14.04.6-LTS": { "Match": ".*" },
-            "14.04.7-LTS": { "Match": ".*" },
-            "14.04.8-LTS": { "Match": ".*" },
-            
-            "16.04-LTS": { "Match": ".*" },
-            "16.04.0-LTS": { "Match": ".*" },
-            
-            "18.04-LTS": { "Match": ".*" },
-            "20.04-LTS": { "Match": ".*" },
-            "22.04-LTS": { "Match": ".*" }
+            "List": [
+                "14.04.0-LTS",
+                "14.04.1-LTS",
+                "14.04.2-LTS",
+                "14.04.3-LTS",
+                "14.04.4-LTS",
+                "14.04.5-LTS",
+                "14.04.6-LTS",
+                "14.04.7-LTS",
+                "14.04.8-LTS",
+                
+                "16.04-LTS",
+                "16.04.0-LTS",
+                "18.04-LTS",
+                "20.04-LTS",
+                "22.04-LTS"
+            ]
         }
     },
     "COREOS": {
@@ -58,16 +68,20 @@ ENDORSED_IMAGE_INFO_MATCHER_JSON = """{
     "OPENLOGIC": {
         "CENTOS": {
             "Minimum": "6.3",
-            "7-LVM": { "Match": ".*" },
-            "7-RAW": { "Match": ".*" }
+            "List": [
+                "7-LVM",
+                "7-RAW"
+            ]
         },
         "CENTOS-HPC": { "Minimum": "6.3" }
     },
     "REDHAT": {
         "RHEL": { 
             "Minimum": "6.7",
-            "7-LVM": { "Match": ".*" },
-            "7-RAW": { "Match": ".*" }
+            "List": [
+                "7-LVM",
+                "7-RAW"
+            ]
         },
         "RHEL-HANA": { "Minimum": "6.7" },
         "RHEL-SAP": { "Minimum": "6.7" },
@@ -76,37 +90,43 @@ ENDORSED_IMAGE_INFO_MATCHER_JSON = """{
     },
     "SUSE": {
         "SLES": {
-            "11-SP4": { "Match": ".*" },
-            "11-SP5": { "Match": ".*" },
-            "11-SP6": { "Match": ".*" },
-            "12-SP1": { "Match": ".*" },
-            "12-SP2": { "Match": ".*" },
-            "12-SP3": { "Match": ".*" },
-            "12-SP4": { "Match": ".*" },
-            "12-SP5": { "Match": ".*" },
-            "12-SP6": { "Match": ".*" }
+            "List": [
+                "11-SP4",
+                "11-SP5",
+                "11-SP6",
+                "12-SP1",
+                "12-SP2",
+                "12-SP3",
+                "12-SP4",
+                "12-SP5",
+                "12-SP6"
+            ]
         },
         "SLES-BYOS": {
-            "11-SP4": { "Match": ".*" },
-            "11-SP5": { "Match": ".*" },
-            "11-SP6": { "Match": ".*" },
-            "12-SP1": { "Match": ".*" },
-            "12-SP2": { "Match": ".*" },
-            "12-SP3": { "Match": ".*" },
-            "12-SP4": { "Match": ".*" },
-            "12-SP5": { "Match": ".*" },
-            "12-SP6": { "Match": ".*" }
+            "List": [
+                "11-SP4",
+                "11-SP5",
+                "11-SP6",
+                "12-SP1",
+                "12-SP2",
+                "12-SP3",
+                "12-SP4",
+                "12-SP5",
+                "12-SP6"
+            ]
         },
         "SLES-SAP": {
-            "11-SP4": { "Match": ".*" },
-            "11-SP5": { "Match": ".*" },
-            "11-SP6": { "Match": ".*" },
-            "12-SP1": { "Match": ".*" },
-            "12-SP2": { "Match": ".*" },
-            "12-SP3": { "Match": ".*" },
-            "12-SP4": { "Match": ".*" },
-            "12-SP5": { "Match": ".*" },
-            "12-SP6": { "Match": ".*" }
+            "List": [
+                "11-SP4",
+                "11-SP5",
+                "11-SP6",
+                "12-SP1",
+                "12-SP2",
+                "12-SP3",
+                "12-SP4",
+                "12-SP5",
+                "12-SP6"
+            ]
         }
     }
 }"""
@@ -124,6 +144,9 @@ class ImageInfoMatcher(object):
 
             if key not in doci:
                 return False
+
+            if 'List' in doci[key] and keys[0] in doci[key]['List']:
+                return True
 
             if 'Match' in doci[key] and re.match(doci[key]['Match'], keys[0]):
                 return True
@@ -200,6 +223,7 @@ class ComputeInfo(DataContract):
                 return IMDS_IMAGE_ORIGIN_PLATFORM
 
         except Exception as e:
+            logger.warn("Could not determine the image origin from IMDS: {0}", str(e))
             return IMDS_IMAGE_ORIGIN_UNKNOWN
 
 
